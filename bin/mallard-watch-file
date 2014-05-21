@@ -1,0 +1,58 @@
+#!/usr/bin/env ruby
+
+require 'mallard-logger'
+require 'mallard-watcher-file'
+
+def watch (conf)
+    while true
+        if $reread
+            conf.halt
+            conf.read
+            $reread = false
+        end
+
+        conf.exec
+        conf.sleep
+    end
+end
+
+def sig_hup
+    $reread = true
+    Signal.trap('HUP') do
+        sig_hup
+    end
+end
+
+def sig_term (conf)
+    conf.halt
+    exit
+end
+
+file    = ARGV[0]
+
+base    = File.basename(file)
+basedir = File.basename(File.dirname(file))
+log     = Mallard::Logger.new("engines/#{basedir}/#{base}.log")
+
+conf    = Mallard::Watcher::File::Conf.new(file, log)
+
+# yes, it's a global.  Signal handling makes you do icky stuff like that sometimes
+$reread = false
+
+Signal.trap('HUP') do
+    sig_hup
+end
+
+Signal.trap('TERM') do
+    sig_term conf
+end
+
+begin
+    Process.daemon
+    log.info('engine started')
+    watch conf
+rescue Exception => exc
+    log.error("backtrace: #{exc.backtrace.join("\n")}")
+    log.error("message: #{exc.message}")
+    raise exc
+end
